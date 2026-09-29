@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Bình chọn tiết mục</title><link rel="stylesheet" href="/style.css"></head>
+<body><main id="app">Đang tải...</main>
+<footer id="foot" hidden><div><span id="info"></span><button class="btn ghost" id="back" hidden>Chọn lại</button><button class="btn" id="next"></button></div></footer>
+<script>
+var S=null,sel=null,view="pick",done=false,VID=null;
+var app=document.getElementById("app"),foot=document.getElementById("foot"),info=document.getElementById("info"),next=document.getElementById("next"),back=document.getElementById("back");
+try{VID=localStorage.getItem("vid");done=localStorage.getItem("voted")==="1"}catch(e){}
+if(!VID){VID=((window.crypto&&crypto.randomUUID)?crypto.randomUUID():String(Math.random()).slice(2)+Date.now()).replace(/-/g,"");try{localStorage.setItem("vid",VID)}catch(e){}}
+function esc(t){return String(t).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+function msg(i,t,s){app.innerHTML='<div class="center"><div class="big">'+i+'</div><h1>'+t+'</h1><p class="sub">'+s+'</p></div>';foot.hidden=true}
+function nm(id){for(var i=0;i<S.candidates.length;i++)if(S.candidates[i].id===id)return S.candidates[i].name;return""}
+function render(){
+  if(!S)return;var st=S.status;
+  if(done)return msg("🎉","Bạn đã bình chọn","Cảm ơn bạn! Phiếu của bạn đã được ghi nhận.");
+  if(st==="prepare")return msg("⏳","Bình chọn chưa mở","Vui lòng đợi ban tổ chức thông báo.");
+  if(st==="paused")return msg("⏸","Bình chọn tạm dừng","Vui lòng đợi ban tổ chức mở lại.");
+  if(st==="closed")return msg("🔒","Bình chọn đã đóng","Cảm ơn bạn đã quan tâm!");
+  if(st==="revealed")return msg("🏆","Đã có kết quả","Hãy xem trên màn hình lớn!");
+  foot.hidden=false;
+  if(view==="confirm"){
+    app.innerHTML='<div class="step">XÁC NHẬN</div><h1>Bạn chọn: '+esc(nm(sel))+'</h1><p class="sub">Mỗi người chỉ được bình chọn một lần và không thể sửa sau khi gửi.</p>';
+    info.textContent="";back.hidden=false;next.textContent="Gửi bình chọn";next.disabled=false;return;
+  }
+  back.hidden=true;
+  app.innerHTML='<div class="cd" id="cd"></div><h1>Chọn tiết mục bạn yêu thích nhất</h1><p class="sub">Chạm vào một tiết mục, chạm lại để bỏ chọn.</p>'+
+   S.candidates.map(function(c){return'<button class="item" data-id="'+c.id+'" aria-pressed="'+(sel===c.id)+'"><div class="n"><b>'+esc(c.name)+'</b><small>'+esc(c.sub)+'</small></div><div class="chk">✓</div></button>'}).join("");
+  info.textContent=sel?nm(sel):"Chưa chọn";next.textContent="Tiếp tục";next.disabled=!sel;tick();
+}
+function tick(){var el=document.getElementById("cd");if(!el||!S||!S.endsAt)return;var s=Math.max(0,Math.round((S.endsAt-(Date.now()+S.off))/1000));el.textContent="Còn "+Math.floor(s/60)+":"+("0"+s%60).slice(-2)}
+app.addEventListener("click",function(e){var b=e.target.closest(".item");if(!b)return;var id=b.getAttribute("data-id");sel=sel===id?null:id;render()});
+back.onclick=function(){view="pick";render()};
+next.onclick=function(){
+  if(view==="pick"){view="confirm";render();return}
+  next.disabled=true;
+  fetch("/api/vote",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({voterId:VID,candidateId:sel})})
+  .then(function(r){return r.json().then(function(d){return{ok:r.ok,st:r.status,d:d}})})
+  .then(function(x){
+    if(x.ok||x.st===409){done=true;try{localStorage.setItem("voted","1")}catch(e){}render()}
+    else{alert(x.d.error||"Có lỗi xảy ra");view="pick";render()}
+  }).catch(function(){alert("Lỗi mạng, hãy thử lại.");next.disabled=false});
+};
+function load(){fetch("/api/state").then(function(r){return r.json()}).then(function(d){
+  if(d.error)return;var ch=!S||d.status!==S.status||JSON.stringify(d.candidates)!==JSON.stringify(S.candidates);
+  S=d;S.off=d.now-Date.now();if(ch){if(d.status!=="open")view="pick";render()}}).catch(function(){})}
+load();setInterval(load,5000);setInterval(tick,1000);
+</script></body></html>

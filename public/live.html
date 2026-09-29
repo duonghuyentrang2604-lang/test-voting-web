@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Live Screen</title><link rel="stylesheet" href="/style.css">
+<style>
+body{overflow:hidden}.wrap{min-height:100vh;display:flex;gap:40px;align-items:center;justify-content:center;padding:40px}
+#stage{flex:1;max-width:900px}#qrbox{text-align:center;background:#fff;color:#111;padding:20px;border-radius:20px}#qrbox p{margin:10px 0 0;font-weight:700}
+.pill{display:inline-block;background:var(--acc);color:var(--accT);font-weight:800;letter-spacing:.1em;padding:8px 18px;border-radius:99px;margin-bottom:20px}
+.huge{font-size:56px;margin:10px 0}.cd{font-size:96px;text-align:left}
+.totbox{font-size:28px;color:var(--mut);margin:10px 0 24px}.totbox span{font-size:56px;font-weight:800;color:var(--text);display:inline-block;transition:transform .3s}.pulse{transform:scale(1.35)}
+.chips{display:flex;flex-wrap:wrap;gap:10px}.chip{background:var(--card);border:1px solid var(--line);padding:10px 16px;border-radius:12px;font-size:20px}
+.rk{display:flex;align-items:center;gap:20px;background:var(--card);border:2px solid var(--line);border-radius:16px;padding:14px 22px;margin-bottom:12px;font-size:28px;opacity:0;transform:translateY(24px);transition:all .7s}
+.rk.in{opacity:1;transform:none}.rk.r0{border-color:var(--acc);font-size:38px;background:#1a3470}
+.no{width:56px;color:var(--acc)}.nm{flex:1}.vt{color:var(--mut)}
+</style></head>
+<body><div class="wrap"><div id="stage"></div><div id="qrbox" hidden><div id="qr"></div><p>Quét mã để bình chọn</p></div></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script>
+var S=null,off=0,last=-1,stage=document.getElementById("stage"),qrbox=document.getElementById("qrbox");
+var LBL={prepare:"SẮP BẮT ĐẦU",open:"ĐANG BÌNH CHỌN",paused:"TẠM DỪNG",closed:"ĐÃ ĐÓNG BÌNH CHỌN",revealed:"KẾT QUẢ"};
+function esc(t){return String(t).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+try{new QRCode(document.getElementById("qr"),{text:location.origin+"/",width:240,height:240})}catch(e){}
+function build(){
+  var st=S.status,h='<div class="pill">'+LBL[st]+'</div>';
+  if(st==="open"||st==="paused")h+='<div class="cd" id="cd"></div><div class="totbox"><span id="tot">0</span> lượt bình chọn</div><div class="chips">'+S.candidates.map(function(c){return'<div class="chip">'+esc(c.name)+'</div>'}).join("")+'</div>';
+  else if(st==="prepare")h+='<h1 class="huge">Sắp bắt đầu bình chọn</h1><p class="sub" style="font-size:22px">Quét mã QR để chuẩn bị</p>';
+  else if(st==="closed")h+='<h1 class="huge">Đã đóng bình chọn</h1><p class="sub" style="font-size:22px">Đang chờ công bố kết quả...</p><div class="totbox"><span id="tot">0</span> lượt bình chọn</div>';
+  else h+='<div>'+S.ranking.slice(0,10).map(function(c,i){return'<div class="rk r'+i+'"><b class="no">#'+(i+1)+'</b><span class="nm">'+esc(c.name)+'</span><span class="vt">'+c.votes+' phiếu</span></div>'}).join("")+'</div>';
+  stage.innerHTML=h;qrbox.hidden=!(st==="open"||st==="paused"||st==="prepare");
+  if(st==="revealed"){[].slice.call(stage.querySelectorAll(".rk")).reverse().forEach(function(el,k){setTimeout(function(){el.classList.add("in")},600+k*1400)})}
+}
+function tick(){
+  var el=document.getElementById("cd");if(!el||!S)return;
+  if(S.status==="paused"){el.textContent="⏸ Tạm dừng";return}
+  if(!S.endsAt){el.textContent="";return}
+  var s=Math.max(0,Math.round((S.endsAt-(Date.now()+off))/1000));el.textContent=Math.floor(s/60)+":"+("0"+s%60).slice(-2);
+}
+function load(){fetch("/api/state").then(function(r){return r.json()}).then(function(d){
+  if(d.error)return;off=d.now-Date.now();
+  var ch=!S||d.status!==S.status||JSON.stringify(d.candidates)!==JSON.stringify(S.candidates)||(d.ranking&&!S.ranking);
+  S=d;if(ch){build();last=-1}
+  var t=document.getElementById("tot");
+  if(t){if(last>=0&&S.total!==last){t.classList.add("pulse");setTimeout(function(){t.classList.remove("pulse")},400)}t.textContent=S.total;last=S.total}
+}).catch(function(){})}
+load();setInterval(load,3000);setInterval(tick,1000);
+</script></body></html>

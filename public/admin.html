@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Quản trị bình chọn</title><link rel="stylesheet" href="/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script></head>
+<body><main id="app"></main>
+<script>
+var tok=null,S=null,timer=null,app=document.getElementById("app");
+try{tok=sessionStorage.getItem("tok")}catch(e){}
+var NAME={prepare:"Chuẩn bị",open:"Đang mở",paused:"Tạm dừng",closed:"Đã đóng",revealed:"Đã công bố"};
+function esc(t){return String(t).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+function fmt(t){return new Date(t).toLocaleString("vi-VN")}
+function api(a,x){return fetch("/api/admin",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+tok},body:JSON.stringify(Object.assign({action:a},x||{}))})
+  .then(function(r){return r.json().then(function(d){if(r.status===401&&a!=="login"){logout()}return r.ok?d:Promise.reject(d)})})}
+function logout(){tok=null;try{sessionStorage.removeItem("tok")}catch(e){}clearInterval(timer);loginView()}
+function loginView(){
+  app.innerHTML='<h1>Đăng nhập quản trị</h1><p class="sub">Dùng email và mật khẩu admin.</p><input type="email" id="em" placeholder="Email"><input type="password" id="pw" placeholder="Mật khẩu"><div class="err" id="err"></div><button class="btn" id="go">Đăng nhập</button>';
+  document.getElementById("go").onclick=function(){
+    api("login",{email:document.getElementById("em").value.trim(),password:document.getElementById("pw").value}).then(function(d){
+      tok=d.token;try{sessionStorage.setItem("tok",tok)}catch(e){}dash()}).catch(function(e){document.getElementById("err").textContent=e.error||"Lỗi"})};
+}
+function dash(){
+  app.innerHTML='<div class="row"><h1 style="flex:1">Quản trị bình chọn</h1><button class="btn ghost" id="lo">Đăng xuất</button></div>'+
+  '<p>Trạng thái: <b id="st"></b> · Tổng phiếu: <b id="tot">0</b></p>'+
+  '<h2>Điều khiển</h2><div class="row"><input type="number" id="min" placeholder="Số phút" min="0"><button class="btn" data-s="open">Mở / mở lại</button><button class="btn ghost" data-s="paused">Tạm dừng</button><button class="btn ghost" data-s="closed">Đóng</button><button class="btn" data-s="revealed">Công bố kết quả</button></div><p class="sub">Để trống số phút = không giới hạn thời gian.</p>'+
+  '<h2>Danh sách tiết mục</h2><div class="row"><input type="file" id="file" accept=".xlsx,.xls,.csv" style="width:auto"><button class="btn ghost" id="tpl">Tải file mẫu</button></div><p class="sub">Excel: cột A = Tên tiết mục, cột B = Mô tả, dòng 1 là tiêu đề.</p><div class="err" id="err"></div>'+
+  '<h2>Số phiếu (chỉ admin thấy)</h2><table id="tb"></table>'+
+  '<h2>Xuất và dọn dữ liệu</h2><div class="row"><button class="btn" id="ex">Xuất Excel</button><button class="btn danger" id="rs">Đặt lại toàn bộ phiếu</button></div>'+
+  '<h2>Nhật ký phiếu gần nhất</h2><div class="log" id="lg"></div><h2>Nhật ký thao tác</h2><div class="log" id="al"></div>';
+  document.getElementById("lo").onclick=logout;
+  [].forEach.call(document.querySelectorAll("[data-s]"),function(b){b.onclick=function(){
+    var s=b.getAttribute("data-s");if(s==="revealed"&&!confirm("Công bố kết quả lên màn hình lớn?"))return;
+    api("status",{status:s,minutes:document.getElementById("min").value}).then(refresh).catch(function(e){alert(e.error)})}});
+  document.getElementById("file").onchange=function(ev){
+    var f=ev.target.files[0];if(!f)return;var r=new FileReader();
+    r.onload=function(){var wb=XLSX.read(r.result,{type:"array"}),rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1});
+      var list=rows.slice(1).filter(function(x){return x[0]}).map(function(x){return{name:x[0],sub:x[1]||""}});
+      if(!confirm("Nhập "+list.length+" tiết mục?"))return;
+      api("import",{candidates:list}).then(function(){document.getElementById("err").textContent="";refresh()}).catch(function(e){document.getElementById("err").textContent=e.error||"Lỗi"});ev.target.value=""};
+    r.readAsArrayBuffer(f)};
+  document.getElementById("tpl").onclick=function(){var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([["Tên tiết mục","Mô tả"],["Ví dụ: Sắc màu Việt","Múa dân gian · 8 bé"]]),"Tiết mục");XLSX.writeFile(wb,"mau-tiet-muc.xlsx")};
+  document.getElementById("ex").onclick=function(){api("log").then(function(d){
+    var nm={};S.candidates.forEach(function(c){nm[c.id]=c.name});
+    var rk=S.candidates.slice().sort(function(a,b){return b.votes-a.votes}).map(function(c,i){return[i+1,c.name,c.sub,c.votes]});
+    var wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([["Hạng","Tiết mục","Mô tả","Số phiếu"]].concat(rk)),"Kết quả");
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([["Thời gian","Tiết mục","Mã thiết bị","Mã mạng (băm)"]].concat(d.log.map(function(l){return[fmt(l.t),nm[l.c]||l.c,l.v,l.ip]}))),"Nhật ký");
+    XLSX.writeFile(wb,"ket-qua-binh-chon.xlsx")})};
+  document.getElementById("rs").onclick=function(){if(confirm("Xóa TOÀN BỘ phiếu, nhật ký và đặt về Chuẩn bị?")&&confirm("Chắc chắn? Không thể khôi phục."))api("reset").then(refresh)};
+  refresh();timer=setInterval(refresh,3000);
+}
+function refresh(){api("stats").then(function(d){
+  S=d;document.getElementById("st").textContent=NAME[d.status]+(d.status==="open"&&d.endsAt?" (đến "+new Date(d.endsAt).toLocaleTimeString("vi-VN")+")":"");
+  document.getElementById("tot").textContent=d.total;
+  document.getElementById("tb").innerHTML='<tr><th>Tiết mục</th><th class="r">Phiếu</th></tr>'+(d.candidates.length?d.candidates.slice().sort(function(a,b){return b.votes-a.votes}).map(function(c){return'<tr><td>'+esc(c.name)+'</td><td class="r">'+c.votes+'</td></tr>'}).join(""):'<tr><td colspan="2">Chưa nhập danh sách tiết mục.</td></tr>');
+  var nm={};d.candidates.forEach(function(c){nm[c.id]=c.name});
+  document.getElementById("lg").innerHTML=d.log.map(function(l){return fmt(l.t)+" · "+esc(nm[l.c]||l.c)+" · thiết bị "+l.v}).join("<br>")||"Chưa có phiếu.";
+  document.getElementById("al").innerHTML=d.alog.map(function(l){return fmt(l.t)+" · "+esc(l.a)}).join("<br>")||"—";
+}).catch(function(){})}
+if(tok)dash();else loginView();
+</script></body></html>
